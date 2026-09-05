@@ -8,6 +8,7 @@ import json
 import time
 import hmac
 import hashlib
+import secrets
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field
@@ -34,11 +35,14 @@ class ResourceLimitExceededException(Exception):
 
 
 def assert_no_phi(text: str) -> None:
+    """Assert that text contains no PHI identifiers. Raises SecurityException if found."""
     if not text:
         return
     for pattern in PHI_PATTERNS:
-        if pattern.search(str(text)):
-            raise SecurityException(f"PHI Outbound Guard Violation: Sensitive identifier detected with pattern {pattern.pattern}")
+        match = pattern.search(str(text))
+        if match:
+            # Log violation without exposing the pattern or matched content
+            raise SecurityException("PHI Outbound Guard Violation: Sensitive identifier detected in outbound data")
 
 
 class PHIGuard:
@@ -57,7 +61,18 @@ class PHIGuard:
 class AuditTrail:
     """Cryptographic Tamper-Evident HMAC-SHA256 Audit Trail."""
     def __init__(self, secret_key: Optional[str] = None):
-        self.secret_key = (secret_key or os.getenv("AUDIT_SECRET_KEY", "outbreak-nowcaster-master-audit-key-2026")).encode("utf-8")
+        # Use provided key, env var, or generate a cryptographically secure random key
+        key = secret_key or os.getenv("AUDIT_SECRET_KEY")
+        if not key:
+            key = secrets.token_hex(32)
+            import warnings
+            warnings.warn(
+                "AUDIT_SECRET_KEY not set. Generated ephemeral key. "
+                "Set AUDIT_SECRET_KEY env var for persistent audit integrity across restarts.",
+                RuntimeWarning,
+                stacklevel=2
+            )
+        self.secret_key = key.encode("utf-8") if isinstance(key, str) else key
         self.logs: List[Dict[str, Any]] = []
 
     def log(self, actor: str, actor_tier: str, event_type: str, details: Dict[str, Any]) -> Dict[str, Any]:
@@ -83,10 +98,22 @@ class AuditTrail:
         return entry
 
     def verify_integrity(self) -> bool:
+        """Verify the integrity of the entire audit chain by recomputing HMAC signatures."""
         for i, entry in enumerate(self.logs):
-            prev = self.logs[i-1]["current_hash"] if i > 0 else "GENESIS_BLOCK_0000000000000000"
+            # Verify chain linkage
+            prev = self.logs[i - 1]["current_hash"] if i > 0 else "GENESIS_BLOCK_0000000000000000"
             if entry["prev_hash"] != prev:
                 return False
+
+            # Verify HMAC signature by recomputing
+            sign_string = (
+                f"{entry['audit_id']}|{entry['timestamp']}|{entry['actor']}|"
+                f"{entry['actor_tier']}|{entry['event_type']}|{entry['payload_hash']}|{entry['prev_hash']}"
+            )
+            expected_sig = hmac.new(self.secret_key, sign_string.encode("utf-8"), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(entry["current_hash"], expected_sig):
+                return False
+
         return True
 
     def get_trail(self) -> List[Dict[str, Any]]:

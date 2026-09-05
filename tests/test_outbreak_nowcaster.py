@@ -8,11 +8,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from agents.base import PHIGuard, AuditLogger, SecurityException
+from agents.base import PHIGuard, AuditLogger, SecurityException, AuditTrail
 from agents.models import SystemTaskPayload, UrgencyLevel, SystemIntegrityStatus
 from agents.workers import InvariantQCWorker, SafetyEscalationWorker, ProtocolConformanceWorker
 from agents.supervisor import SystemSupervisor
-from cli import main
+from cli import main, _safe_resolve_path
 
 
 def test_phi_guard_enforcement():
@@ -63,3 +63,95 @@ def test_supervisor_consensus_and_audit():
     assert main(["audit", "--task-id", "CLI-TEST-01"]) == 0
     assert main(["chat", "Explain", "specifications"]) == 0
     assert main(["verify-audit"]) == 0
+
+
+def test_phi_guard_ssn_detection():
+    """Test PHI guard detects SSN patterns."""
+    with pytest.raises(SecurityException):
+        PHIGuard.assert_no_phi("Patient SSN: 123-45-6789")
+
+
+def test_phi_guard_phone_detection():
+    """Test PHI guard detects phone numbers."""
+    with pytest.raises(SecurityException):
+        PHIGuard.assert_no_phi("Contact: (555) 123-4567")
+
+
+def test_phi_guard_email_detection():
+    """Test PHI guard detects email addresses."""
+    with pytest.raises(SecurityException):
+        PHIGuard.assert_no_phi("Email: patient@hospital.org")
+
+
+def test_phi_guard_dob_detection():
+    """Test PHI guard detects date of birth patterns."""
+    with pytest.raises(SecurityException):
+        PHIGuard.assert_no_phi("DOB: 01/15/1985")
+
+
+def test_phi_guard_name_detection():
+    """Test PHI guard detects patient name patterns."""
+    with pytest.raises(SecurityException):
+        PHIGuard.assert_no_phi("Patient Name: John Smith")
+
+
+def test_phi_guard_redaction():
+    """Test PHI redaction replaces identifiers."""
+    text = "Patient MRN-12345 has appointment"
+    redacted = PHIGuard.redact_phi(text)
+    assert "MRN-12345" not in redacted
+    assert "REDACTED_IDENTIFIER" in redacted
+
+
+def test_phi_guard_no_pattern_exposure():
+    """Test that PHI error messages don't expose regex patterns."""
+    try:
+        PHIGuard.assert_no_phi("Patient MRN-12345")
+        assert False, "Should have raised SecurityException"
+    except SecurityException as e:
+        error_msg = str(e)
+        # Should not expose the regex pattern
+        assert "MRN" not in error_msg or "pattern" not in error_msg.lower()
+        assert "re.compile" not in error_msg
+
+
+def test_phi_guard_empty_input():
+    """Test PHI guard handles empty/None input gracefully."""
+    PHIGuard.assert_no_phi("")
+    PHIGuard.assert_no_phi(None)
+
+
+def test_audit_trail_integrity():
+    """Test HMAC audit trail integrity verification."""
+    trail = AuditTrail(secret_key="test-key-for-testing")
+    trail.log("test_actor", "tier1", "TEST_EVENT", {"data": "value1"})
+    trail.log("test_actor", "tier1", "TEST_EVENT", {"data": "value2"})
+    assert trail.verify_integrity() is True
+
+
+def test_audit_trail_tamper_detection():
+    """Test that audit trail detects tampering."""
+    trail = AuditTrail(secret_key="test-key-for-testing")
+    trail.log("test_actor", "tier1", "TEST_EVENT", {"data": "value1"})
+    # Tamper with the entry
+    if trail.logs:
+        trail.logs[0]["payload_hash"] = "tampered_hash"
+    assert trail.verify_integrity() is False
+
+
+def test_audit_trail_chaining():
+    """Test that audit trail entries are properly chained."""
+    trail = AuditTrail(secret_key="test-key-for-testing")
+    trail.log("actor1", "tier1", "EVENT1", {"a": 1})
+    trail.log("actor2", "tier2", "EVENT2", {"b": 2})
+
+    assert len(trail.logs) == 2
+    assert trail.logs[1]["prev_hash"] == trail.logs[0]["current_hash"]
+
+
+def test_safe_resolve_path():
+    """Test safe path resolution."""
+    from pathlib import Path
+    result = _safe_resolve_path(".")
+    assert isinstance(result, Path)
+    assert result.is_absolute()
