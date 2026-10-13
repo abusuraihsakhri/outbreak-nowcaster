@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+venv
+__pycache__
+.pytest_cache
+*.pyc
+*.egg-info
+.env
+.env.*
+!*.env.example
+tests
+test_nowcaster.py
+*.log

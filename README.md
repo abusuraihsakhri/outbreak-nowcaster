@@ -1,200 +1,71 @@
 # Outbreak Nowcaster
 
-> **Domain:** Infectious Disease Surveillance & Microbiology
-> **Reference Guidelines & Standards:** `CLSI M100, EUCAST & CDC NHSN Clinical Standards`
+A local, illustrative **reporting-delay-adjusted incidence** calculator for aggregated outbreak surveillance, with preserved legacy medical-score and agent-audit utilities.
 
-<div align="center">
+## What it does
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688.svg?logo=fastapi&logoColor=white)
-![Audit Trail](https://img.shields.io/badge/Audit-HMAC--SHA256_Tamper--Evident-brightgreen.svg)
-![Zero-PHI Guard](https://img.shields.io/badge/Guard-Zero--PHI_Outbound-blue.svg)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white)
+The **static web application** accepts aggregated case counts indexed by **event date** (such as symptom onset). For each event date it divides the number of cases already reported by the cumulative probability that such events would have been reported after the elapsed number of days. It displays observed and adjusted daily counts, a chart, and an exportable CSV.
 
-</div>
+This is a deterministic inverse-completeness correction, **not** a trained outbreak forecast, validated epidemiologic model, or clinical decision-support tool. It does not predict future incidence, estimate uncertainty intervals, account for changing delay distributions, or infer reporting delays from supplied counts. The default weights `0.50,0.25,0.15,0.10` are *illustrative*. Calibrate delays from your own reporting history before interpreting results.
 
----
+## Browser use
 
-## 📖 What It Does
+Open the deployed GitHub Pages site, or open `web/index.html` locally. Enter a snapshot date, reporting-delay weights for delays of 0, 1, 2, ... days, and CSV data such as:
 
-Outbreak Nowcaster is a clinical decision support system for antimicrobial stewardship and microbiology. It provides:
-
-- **Medical Score Calculations**: MELD-Na, QTc (Bazett), BMI-z, HbA1c conversion, APRI/FIB-4
-- **Multi-Agent Analysis**: Distributed worker agents for QC, safety, and protocol conformance
-- **Zero-PHI Outbound Guard**: Prevents protected health information from leaving the system
-- **Tamper-Evident Audit Trail**: HMAC-SHA256 chained cryptographic audit logging
-- **FastAPI REST API**: OpenAPI 3.1 endpoints for integration with clinical systems
-
----
-
-## ⚙️ Key Capabilities & Algorithmic Modules
-
-### 🔬 Medical Calculation Functions
-
-| Function | Description | Input Parameters |
-|:---------|:------------|:-----------------|
-| `calculate_meld_na()` | MELD-Na score for liver disease severity | bilirubin, creatinine, INR, sodium, dialysis |
-| `calculate_qtc()` | QTc interval (Bazett's formula) | QT ms, RR ms or HR bpm |
-| `calculate_bmi_z()` | BMI and z-score (adult/pediatric) | weight kg, height cm, age months, sex |
-| `convert_hba1c()` | HbA1c ↔ eAG conversion (ADA formula) | HbA1c% or eAG mg/dL |
-| `calculate_apri_fib4()` | Liver fibrosis scores | AST, ALT, platelets, age |
-| `calculate_score()` | Generic weighted score | arbitrary numeric inputs |
-
-### 🤖 Multi-Agent Workers
-
-- **InvariantQCWorker**: Primary metric threshold monitoring
-- **SafetyEscalationWorker**: Critical safety interlock detection
-- **ProtocolConformanceWorker**: Discordance and anomaly triage
-
----
-
-## 💻 Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/abusuraihsakhri/outbreak-nowcaster.git
-cd outbreak-nowcaster
-
-# Install dependencies
-pip install -e .
-
-# Or install with development dependencies
-pip install -e ".[dev]"
+```csv
+date,reported
+2026-10-11,90
+2026-10-12,15
+2026-10-13,5
 ```
 
----
+Select **Calculate nowcast**; **Export CSV** downloads the adjusted results. The **Load example** button creates illustrative relative-date records. Files must be at most 1 MB, event dates must be unique and no later than the snapshot date, and counts must be nonnegative integers. All modern evergreen browsers with JavaScript, Blob downloads, and File API support can run the page without Python, Pyodide, a service worker, or a backend.
 
-## 💻 CLI Quickstart & Usage
+**Privacy:** Browser calculations are local and do not transmit, persist, or log entered data. The page uses no third-party fonts, trackers, or external JavaScript. Use aggregated de-identified counts only.
 
-### 1. Medical Score Calculations (nowcaster.py)
+## Python CLI
+
+Python 3.10 or newer; no dependencies are needed for the standalone `incidence.py` nowcasting CLI:
 
 ```bash
-# Single calculation with JSON input
-python nowcaster.py single --json '{"bilirubin": 2.0, "creatinine": 1.2, "inr": 1.5, "sodium": 135}'
-
-# Direct parameters
-python nowcaster.py single --bili 2.0 --creat 1.2 --inr 1.5 --na 135
-
-# Batch CSV processing
-python nowcaster.py batch --input sample.csv --output results.csv
+python incidence.py --input surveillance.csv --as-of 2026-10-13 --delays 0.5,0.3,0.2 --output result.csv
 ```
 
-### 2. Multi-Agent Analysis (cli.py)
+The installed entry point is `incidence-nowcast` and returns the same columns: `date,reported,age_days,completeness,nowcast,additional_estimated`.
+
+For the retained legacy API/agents and unrelated medical-score utilities:
 
 ```bash
-# Run single task evaluation
-python cli.py audit --task-id TASK-001 --primary 28.5 --secondary 14.2 --critical
-
-# Batch process CSV records
-python cli.py batch -i input.csv -o output.csv
-
-# Verify audit trail integrity
-python cli.py verify-audit
-
-# Launch FastAPI REST server
+python -m pip install -e ".[dev]"
+python -m pytest -q
+python cli.py audit --task-id TEST-01 --primary 15
+python nowcaster.py single --qt 400 --rr 1000
 python cli.py serve --host 127.0.0.1 --port 8000
 ```
 
-### 3. Interactive Chat
+The FastAPI routes are `/health`, `/metrics`, `/api/audit`, `/api/chat`, and `/api/audit/logs`. The `/metrics` route responds with JSON, not Prometheus exposition format. The legacy chat provider is a deterministic mock; setting a remote-model provider does not activate remote inference. Existing score methods include approximations and are not validated for clinical care.
+
+## Deployment and safety
+
+The web page is static and runs independently of the Python backend. GitHub Actions tests the Python and browser calculations and deploys the `web/` directory to GitHub Pages on `master` updates.
+
+The optional FastAPI server is **not authenticated** and should not be exposed publicly. Its regular-expression identifier filter is limited and is **not a comprehensive PHI de-identification solution**. The HMAC audit chain is stored in process memory, not durable storage. Run it only on a trusted local network with de-identified inputs.
+
+For Docker Compose, set `AUDIT_SECRET_KEY` to a unique random value in your environment (see `.env.example`) before running `docker compose up --build`. The Compose configuration publishes to loopback only. Do not commit keys or add them to client-side code.
+
+## Development
+
+The repository uses Python, FastAPI, Pydantic, vanilla JavaScript, CSS, and Node's built-in test runner. Run:
 
 ```bash
-python cli.py chat "Explain the MELD-Na scoring system"
+python -m pip install -e ".[dev]"
+python -m pytest -q
+node --test web/nowcast.test.cjs
+node --check web/app.js
 ```
 
----
+The legacy `cli.py`, `nowcaster.py`, `agents/`, `enrichment.py`, and `simulator.py` remain available for their existing workflows.
 
-## 🔌 REST API Endpoints
+## License
 
-| Endpoint | Method | Description |
-|:---------|:-------|:------------|
-| `/health` | GET | Health check and system metadata |
-| `/metrics` | GET | Prometheus operational metrics |
-| `/api/audit` | POST | Submit task for multi-agent analysis |
-| `/api/chat` | POST | Supervisory conversational assistant |
-| `/api/audit/logs` | GET | Retrieve and verify HMAC audit trail |
-
----
-
-## 🛡️ Security & Enterprise Architecture
-
-* **Zero-PHI Outbound Interceptor:** Active regex inspection blocking SSNs, MRNs, phone numbers, emails, DOBs, and patient identifiers. Error messages do not expose regex patterns.
-* **Tamper-Evident HMAC-SHA256 Audit Trail:** Chained, cryptographically signed logs for every evaluation and state transition.
-* **Secure Key Management:** Uses `AUDIT_SECRET_KEY` environment variable or generates cryptographically secure ephemeral keys.
-* **Path Traversal Protection:** File operations use safe path resolution.
-
-### Environment Variables
-
-| Variable | Description | Default |
-|:---------|:------------|:--------|
-| `AUDIT_SECRET_KEY` | Secret key for HMAC audit trail | Auto-generated (ephemeral) |
-| `MODEL_PROVIDER` | LLM provider (mock/ollama/claude/openai) | mock |
-
----
-
-## 🧪 Testing & Verification
-
-Run the automated test suite:
-
-```bash
-pytest -v
-```
-
-Execute high-throughput batch simulation benchmarks:
-
-```bash
-python simulator.py 1000
-```
-
----
-
-## 🐳 Container Deployment
-
-```bash
-docker build -t outbreak-nowcaster .
-docker run -p 8000:8000 -e AUDIT_SECRET_KEY=your-secret-key outbreak-nowcaster
-```
-
-Or using Docker Compose:
-
-```bash
-docker-compose up -d
-```
-
----
-
-## 📁 Project Structure
-
-```
-outbreak-nowcaster/
-├── agents/                 # Multi-agent analysis system
-│   ├── __init__.py         # Package initialization
-│   ├── api.py              # FastAPI REST endpoints
-│   ├── base.py             # Security, PHI guard, audit trail
-│   ├── learning.py         # Bayesian calibration engine
-│   ├── llm_factory.py      # LLM provider factory
-│   ├── metrics.py          # Prometheus metrics collector
-│   ├── models.py           # Pydantic data models
-│   ├── streamer.py         # WebSocket telemetry
-│   ├── supervisor.py       # Multi-agent orchestrator
-│   └── workers.py          # Specialized worker agents
-├── tests/                  # Test suite
-│   ├── test_enrichment.py  # Enrichment module tests
-│   └── test_outbreak_nowcaster.py  # Core system tests
-├── web/                    # Web dashboard
-│   └── index.html          # Operations console
-├── cli.py                  # Main CLI entry point
-├── nowcaster.py            # Medical score calculations
-├── enrichment.py           # Feature enrichment engine
-├── simulator.py            # High-throughput simulation
-├── pyproject.toml          # Project configuration
-├── Dockerfile              # Container build
-├── docker-compose.yml      # Container orchestration
-└── sample.csv              # Sample input data
-```
-
----
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details.
+[MIT](LICENSE).

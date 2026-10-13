@@ -34,10 +34,15 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Project specific
+# Outputs
 results.csv
 output.csv
 *.log
+
+# Local secrets
+.env
+.env.*
+!.env.example
 
 # Docker
 .docker/
